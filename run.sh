@@ -98,6 +98,13 @@ detect_os() {
   esac
 }
 
+normalize_docker_api_env() {
+  if [[ -n "${DOCKER_API_VERSION:-}" ]]; then
+    log_warn "Detected DOCKER_API_VERSION=${DOCKER_API_VERSION} in host shell; unsetting to allow Docker API negotiation."
+    unset DOCKER_API_VERSION
+  fi
+}
+
 verify_prereqs() {
   CURRENT_STAGE="prerequisite validation"
   require_cmd docker
@@ -111,6 +118,7 @@ verify_prereqs() {
     exit 1
   fi
 
+  normalize_docker_api_env
   verify_docker_daemon
 }
 
