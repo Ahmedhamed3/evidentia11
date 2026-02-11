@@ -467,9 +467,35 @@ verify_anchor_peers_in_channel_block() {
     configtxgen -inspectBlock '${channel_block}' > '${inspect_file}'
   "
 
-  cli_exec "jq -e '.data.data[0].payload.data.config.channel_group.groups.Application.groups.LawEnforcementMSP.values.AnchorPeers.value.anchor_peers[] | select(.host == \"peer0.lawenforcement.evidentia.network\" and .port == 7051)' '${inspect_file}' >/dev/null"
-  cli_exec "jq -e '.data.data[0].payload.data.config.channel_group.groups.Application.groups.ForensicLabMSP.values.AnchorPeers.value.anchor_peers[] | select(.host == \"peer0.forensiclab.evidentia.network\" and .port == 9051)' '${inspect_file}' >/dev/null"
-  cli_exec "jq -e '.data.data[0].payload.data.config.channel_group.groups.Application.groups.JudiciaryMSP.values.AnchorPeers.value.anchor_peers[] | select(.host == \"peer0.judiciary.evidentia.network\" and .port == 11051)' '${inspect_file}' >/dev/null"
+  if ! cli_exec "jq -e '.data.data[0].payload.data.config.channel_group.groups.Application | type == \"object\"' '${inspect_file}' >/dev/null"; then
+    log_error "Application group is missing in channel config block; cannot validate anchor peers."
+    exit 1
+  fi
+
+  assert_anchor_peer_present() {
+    local org_msp="$1"
+    local expected_host="$2"
+    local expected_port="$3"
+
+    if ! cli_exec "jq -e --arg org '${org_msp}' '.data.data[0].payload.data.config.channel_group.groups.Application.groups[\$org] | type == \"object\"' '${inspect_file}' >/dev/null"; then
+      log_error "Org group '${org_msp}' not found under Application in channel config block."
+      exit 1
+    fi
+
+    if ! cli_exec "jq -e --arg org '${org_msp}' '.data.data[0].payload.data.config.channel_group.groups.Application.groups[\$org].values.AnchorPeers | type == \"object\"' '${inspect_file}' >/dev/null"; then
+      log_error "AnchorPeers value is missing for '${org_msp}' in channel config block."
+      exit 1
+    fi
+
+    if ! cli_exec "jq -e --arg org '${org_msp}' --arg host '${expected_host}' --argjson port ${expected_port} '((.data.data[0].payload.data.config.channel_group.groups.Application.groups[\$org].values.AnchorPeers.value.anchor_peers) // []) | any(.host == \$host and .port == \$port)' '${inspect_file}' >/dev/null"; then
+      log_error "Expected anchor peer ${expected_host}:${expected_port} not found for '${org_msp}'."
+      exit 1
+    fi
+  }
+
+  assert_anchor_peer_present "LawEnforcementMSP" "peer0.lawenforcement.evidentia.network" "7051"
+  assert_anchor_peer_present "ForensicLabMSP" "peer0.forensiclab.evidentia.network" "9051"
+  assert_anchor_peer_present "JudiciaryMSP" "peer0.judiciary.evidentia.network" "11051"
 
   log_info "Anchor peers are already embedded in the channel config block and active at channel creation time."
 }
