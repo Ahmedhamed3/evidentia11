@@ -477,17 +477,24 @@ verify_anchor_peers_in_channel_block() {
     local expected_host="$2"
     local expected_port="$3"
 
-    if ! cli_exec "jq -e --arg org '${org_msp}' '.data.data[0].payload.data.config.channel_group.groups.Application.groups[\$org] | type == \"object\"' '${inspect_file}' >/dev/null"; then
-      log_error "Org group '${org_msp}' not found under Application in channel config block."
+    if ! cli_exec "jq -e --arg msp '${org_msp}' '
+      (.data.data[0].payload.data.config.channel_group.groups.Application.groups // {})
+      | to_entries
+      | any((.value.values.MSP.value.config.name // empty) == \$msp)
+    ' '${inspect_file}' >/dev/null"; then
+      log_error "Org with MSP ID '${org_msp}' not found under Application in channel config block."
       exit 1
     fi
 
-    if ! cli_exec "jq -e --arg org '${org_msp}' '.data.data[0].payload.data.config.channel_group.groups.Application.groups[\$org].values.AnchorPeers | type == \"object\"' '${inspect_file}' >/dev/null"; then
-      log_error "AnchorPeers value is missing for '${org_msp}' in channel config block."
-      exit 1
-    fi
-
-    if ! cli_exec "jq -e --arg org '${org_msp}' --arg host '${expected_host}' --argjson port ${expected_port} '((.data.data[0].payload.data.config.channel_group.groups.Application.groups[\$org].values.AnchorPeers.value.anchor_peers) // []) | any(.host == \$host and .port == \$port)' '${inspect_file}' >/dev/null"; then
+    if ! cli_exec "jq -e --arg msp '${org_msp}' --arg host '${expected_host}' --argjson port ${expected_port} '
+      (
+        (.data.data[0].payload.data.config.channel_group.groups.Application.groups // {})
+        | to_entries[]?
+        | select((.value.values.MSP.value.config.name // empty) == \$msp)
+        | (.value.values.AnchorPeers.value.anchor_peers // [])
+      )
+      | any(.host == \$host and .port == \$port)
+    ' '${inspect_file}' >/dev/null"; then
       log_error "Expected anchor peer ${expected_host}:${expected_port} not found for '${org_msp}'."
       exit 1
     fi
