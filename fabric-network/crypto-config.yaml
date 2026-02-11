@@ -1,8 +1,9 @@
 # Copyright Evidentia Chain-of-Custody System
-# Crypto configuration for generating certificates and keys
+# Crypto material definition for cryptogen.
 #
-# Design Decision: Each organization has its own CA for identity management.
-# Users are created with specific roles encoded in certificate attributes.
+# Notes:
+# - Domains and organization names here MUST match configtx.yaml MSP definitions.
+# - EnableNodeOUs is enabled for all orgs so Fabric can classify admin/peer/client/orderer identities.
 
 OrdererOrgs:
   - Name: Orderer
@@ -24,12 +25,7 @@ PeerOrgs:
         - localhost
         - 127.0.0.1
     Users:
-      Count: 3
-      # Users will be:
-      # - Admin (default admin user)
-      # - User1 (Evidence Collector role)
-      # - User2 (Supervisor role)
-      # - User3 (additional collector)
+      Count: 1
 
   - Name: ForensicLab
     Domain: forensiclab.evidentia.network
@@ -40,12 +36,7 @@ PeerOrgs:
         - localhost
         - 127.0.0.1
     Users:
-      Count: 3
-      # Users will be:
-      # - Admin (default admin user)
-      # - User1 (Forensic Analyst role)
-      # - User2 (Lab Supervisor role)
-      # - User3 (additional analyst)
+      Count: 1
 
   - Name: Judiciary
     Domain: judiciary.evidentia.network
@@ -56,9 +47,4 @@ PeerOrgs:
         - localhost
         - 127.0.0.1
     Users:
-      Count: 3
-      # Users will be:
-      # - Admin (default admin user)
-      # - User1 (Legal Counsel role)
-      # - User2 (Judge role)
-      # - User3 (System Auditor role)
+      Count: 1

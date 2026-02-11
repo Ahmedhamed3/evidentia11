@@ -1,9 +1,10 @@
 # Copyright Evidentia Chain-of-Custody System
-# Configuration for Hyperledger Fabric Network
-# 
-# Design Decision: The paper specifies multiple organizations for forensic workflow.
-# We implement 3 organizations (LawEnforcement, ForensicLab, Judiciary) plus an Orderer org.
-# Single channel "evidence-channel" shared by all orgs for evidence chain-of-custody.
+# Hyperledger Fabric channel configuration profiles.
+#
+# Critical alignment rules:
+# - MSP IDs must match peer/orderer runtime env values.
+# - MSPDir paths are evaluated relative to FABRIC_CFG_PATH.
+# - Paths intentionally point to ./crypto-config because generate.sh creates that tree.
 
 Organizations:
   - &OrdererOrg
@@ -160,13 +161,15 @@ Channel: &ChannelDefaults
     <<: *ChannelCapabilities
 
 Profiles:
-  EvidentiaCoCGenesis:
+  # Genesis profile for orderer bootstrap and participation API startup.
+  OrdererGenesis:
     <<: *ChannelDefaults
     Orderer:
       <<: *OrdererDefaults
       Organizations:
         - *OrdererOrg
-      Capabilities: *OrdererCapabilities
+      Capabilities:
+        <<: *OrdererCapabilities
     Consortiums:
       EvidentiaConsortium:
         Organizations:
@@ -174,10 +177,24 @@ Profiles:
           - *ForensicLabOrg
           - *JudiciaryOrg
 
-  # Application channel profile used to generate evidence-channel artifacts.
-  # This profile is consumed by configtxgen for:
-  # - channel.tx (legacy create channel transaction)
-  # - evidencechannel.block (participation API config block used by osnadmin channel join)
+  # Backward-compatible profile name retained for existing tooling.
+  EvidentiaCoCGenesis:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+      Capabilities:
+        <<: *OrdererCapabilities
+    Consortiums:
+      EvidentiaConsortium:
+        Organizations:
+          - *LawEnforcementOrg
+          - *ForensicLabOrg
+          - *JudiciaryOrg
+
+  # Dedicated application channel profile.
+  # Used for channel.tx + evidencechannel.block + anchor updates.
   EvidentiaCoCChannel:
     Consortium: EvidentiaConsortium
     <<: *ChannelDefaults
@@ -187,5 +204,5 @@ Profiles:
         - *LawEnforcementOrg
         - *ForensicLabOrg
         - *JudiciaryOrg
-      Capabilities: *ApplicationCapabilities
-
+      Capabilities:
+        <<: *ApplicationCapabilities
