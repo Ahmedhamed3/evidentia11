@@ -89,15 +89,14 @@ services:
       - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
       # Chaincode container network - CRITICAL for chaincode to resolve peer hostname
       - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=evidentia_network
-      # Use TCP endpoint for Docker on Windows Docker Desktop
-      - CORE_VM_ENDPOINT=tcp://host.docker.internal:2375
-      # Set Docker API version for compatibility
-      - DOCKER_API_VERSION=1.44
+      # Use Docker socket so API version negotiation follows the daemon automatically
+      - CORE_VM_ENDPOINT=unix:///var/run/docker.sock
     volumes:
       - ../crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/msp:/etc/hyperledger/fabric/msp
       - ../crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls:/etc/hyperledger/fabric/tls
       - peer0.lawenforcement.evidentia.network:/var/hyperledger/production
       - ../peercfg:/etc/hyperledger/peercfg
+      - /var/run/docker.sock:/var/run/docker.sock
     working_dir: /root
     command: peer node start
     ports:
@@ -140,15 +139,14 @@ services:
       - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
       # Chaincode container network - CRITICAL for chaincode to resolve peer hostname
       - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=evidentia_network
-      # Use TCP endpoint for Docker on Windows Docker Desktop
-      - CORE_VM_ENDPOINT=tcp://host.docker.internal:2375
-      # Set Docker API version for compatibility
-      - DOCKER_API_VERSION=1.44
+      # Use Docker socket so API version negotiation follows the daemon automatically
+      - CORE_VM_ENDPOINT=unix:///var/run/docker.sock
     volumes:
       - ../crypto-config/peerOrganizations/forensiclab.evidentia.network/peers/peer0.forensiclab.evidentia.network/msp:/etc/hyperledger/fabric/msp
       - ../crypto-config/peerOrganizations/forensiclab.evidentia.network/peers/peer0.forensiclab.evidentia.network/tls:/etc/hyperledger/fabric/tls
       - peer0.forensiclab.evidentia.network:/var/hyperledger/production
       - ../peercfg:/etc/hyperledger/peercfg
+      - /var/run/docker.sock:/var/run/docker.sock
     working_dir: /root
     command: peer node start
     ports:
@@ -191,15 +189,14 @@ services:
       - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
       # Chaincode container network - CRITICAL for chaincode to resolve peer hostname
       - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=evidentia_network
-      # Use TCP endpoint for Docker on Windows Docker Desktop
-      - CORE_VM_ENDPOINT=tcp://host.docker.internal:2375
-      # Set Docker API version for compatibility
-      - DOCKER_API_VERSION=1.44
+      # Use Docker socket so API version negotiation follows the daemon automatically
+      - CORE_VM_ENDPOINT=unix:///var/run/docker.sock
     volumes:
       - ../crypto-config/peerOrganizations/judiciary.evidentia.network/peers/peer0.judiciary.evidentia.network/msp:/etc/hyperledger/fabric/msp
       - ../crypto-config/peerOrganizations/judiciary.evidentia.network/peers/peer0.judiciary.evidentia.network/tls:/etc/hyperledger/fabric/tls
       - peer0.judiciary.evidentia.network:/var/hyperledger/production
       - ../peercfg:/etc/hyperledger/peercfg
+      - /var/run/docker.sock:/var/run/docker.sock
     working_dir: /root
     command: peer node start
     ports:
@@ -219,7 +216,7 @@ services:
     environment:
       - GOPATH=/opt/gopath
       - FABRIC_LOGGING_SPEC=INFO
-      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_VM_ENDPOINT=unix:///var/run/docker.sock
       - CORE_PEER_ID=cli
       - CORE_PEER_ADDRESS=peer0.lawenforcement.evidentia.network:7051
       - CORE_PEER_LOCALMSPID=LawEnforcementMSP
@@ -235,6 +232,7 @@ services:
       - ../channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
       - ../../chaincode:/opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode
       - ../scripts:/opt/gopath/src/github.com/hyperledger/fabric/peer/scripts
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - peer0.lawenforcement.evidentia.network
       - peer0.forensiclab.evidentia.network
