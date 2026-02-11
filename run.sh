@@ -29,6 +29,8 @@ GATEWAY_RETRY_SLEEP="${GATEWAY_RETRY_SLEEP:-3}"
 CHAINCODE_DEPLOY_MODE="${CHAINCODE_DEPLOY_MODE:-auto}"  # auto|ccaas|legacy
 
 CLI_CONTAINER_NAME="${CLI_CONTAINER_NAME:-cli}"
+CLI_IMAGE="${CLI_IMAGE:-hyperledger/fabric-tools:2.5.10}"
+CLI_NETWORK="${CLI_NETWORK:-evidentia_network}"
 CLI_WORKDIR="/opt/gopath/src/github.com/hyperledger/fabric/peer"
 CLI_CRYPTO_BASE="$CLI_WORKDIR/crypto"
 CLI_ORDERER_CA="$CLI_CRYPTO_BASE/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/msp/tlscacerts/tlsca.evidentia.network-cert.pem"
@@ -156,6 +158,39 @@ cli_exec_capture() {
   docker exec "$CLI_CONTAINER_NAME" bash -lc "$*"
 }
 
+sync_path_to_cli() {
+  local source_path="$1"
+  local target_path="$2"
+
+  if [[ ! -e "$source_path" ]]; then
+    return 0
+  fi
+
+  cli_exec "mkdir -p '$(dirname "$target_path")' && rm -rf '$target_path'"
+  docker cp "$source_path" "${CLI_CONTAINER_NAME}:${target_path}"
+}
+
+sync_cli_workspace() {
+  CURRENT_STAGE="fabric CLI workspace synchronization"
+
+  mkdir -p "$FABRIC_DIR/crypto-config" "$FABRIC_DIR/channel-artifacts"
+
+  sync_path_to_cli "$FABRIC_DIR/crypto-config" "$CLI_CRYPTO_BASE"
+  sync_path_to_cli "$FABRIC_DIR/channel-artifacts" "$CLI_WORKDIR/channel-artifacts"
+  sync_path_to_cli "$PROJECT_ROOT/chaincode" "$CLI_WORKDIR/chaincode"
+  sync_path_to_cli "$FABRIC_DIR/scripts" "$CLI_WORKDIR/scripts"
+
+  if [[ -f "$FABRIC_DIR/configtx.yaml" ]]; then
+    docker cp "$FABRIC_DIR/configtx.yaml" "${CLI_CONTAINER_NAME}:${CLI_WORKDIR}/configtx.yaml"
+  fi
+  if [[ -f "$FABRIC_DIR/crypto-config.yaml" ]]; then
+    docker cp "$FABRIC_DIR/crypto-config.yaml" "${CLI_CONTAINER_NAME}:${CLI_WORKDIR}/crypto-config.yaml"
+  fi
+  if [[ -f "$FABRIC_DIR/collections_config.json" ]]; then
+    docker cp "$FABRIC_DIR/collections_config.json" "${CLI_CONTAINER_NAME}:${CLI_WORKDIR}/collections_config.json"
+  fi
+}
+
 fabric_peer_env() {
   local org="$1"
   case "$org" in
@@ -206,12 +241,28 @@ ensure_cli_container() {
 
   if container_running "$CLI_CONTAINER_NAME"; then
     log_info "Fabric CLI container '${CLI_CONTAINER_NAME}' is already running."
+    sync_cli_workspace
     return 0
   fi
 
-  log_step "Starting Fabric CLI container '${CLI_CONTAINER_NAME}'"
-  (cd "$FABRIC_DOCKER_DIR" && run_compose -f docker-compose-fabric.yaml up -d "$CLI_CONTAINER_NAME")
+  if container_exists "$CLI_CONTAINER_NAME"; then
+    log_step "Starting existing Fabric CLI container '${CLI_CONTAINER_NAME}'"
+    docker start "$CLI_CONTAINER_NAME" >/dev/null
+    wait_until "CLI container ${CLI_CONTAINER_NAME} running" "$RETRY_MAX" "$RETRY_SLEEP" "docker ps --format '{{.Names}}' | grep -Fxq '${CLI_CONTAINER_NAME}'"
+    sync_cli_workspace
+    return 0
+  fi
+
+  if [[ -f "$FABRIC_DOCKER_DIR/docker-compose-fabric.yaml" ]]; then
+    log_step "Creating Fabric CLI container '${CLI_CONTAINER_NAME}' via docker compose"
+    (cd "$FABRIC_DOCKER_DIR" && run_compose -f docker-compose-fabric.yaml up -d --no-deps "$CLI_CONTAINER_NAME")
+  else
+    log_step "Creating Fabric CLI container '${CLI_CONTAINER_NAME}' via docker run"
+    docker run -d --name "$CLI_CONTAINER_NAME" --network "$CLI_NETWORK" -w "$CLI_WORKDIR" "$CLI_IMAGE" /bin/bash -lc "trap : TERM INT; sleep infinity & wait"
+  fi
+
   wait_until "CLI container ${CLI_CONTAINER_NAME} running" "$RETRY_MAX" "$RETRY_SLEEP" "docker ps --format '{{.Names}}' | grep -Fxq '${CLI_CONTAINER_NAME}'"
+  sync_cli_workspace
 }
 
 ensure_crypto_material() {
@@ -225,16 +276,22 @@ ensure_crypto_material() {
   rm -rf "$FABRIC_DIR/crypto-config" "$FABRIC_DIR/channel-artifacts"
   mkdir -p "$FABRIC_DIR/channel-artifacts"
 
-  docker run --rm \
-    -v "$FABRIC_DIR":/workspace/fabric-network \
-    -w /workspace/fabric-network \
-    -e FABRIC_CFG_PATH=/workspace/fabric-network \
-    hyperledger/fabric-tools:2.5.10 \
-    bash -lc '
-      cryptogen generate --config=crypto-config.yaml --output=crypto-config
-      configtxgen -profile EvidentiaCoCGenesis -outputBlock ./channel-artifacts/evidencechannel.block -channelID evidence-channel
-      cp crypto-config/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/msp/signcerts/Admin@evidentia.network-cert.pem crypto-config/ordererOrganizations/evidentia.network/msp/admincerts/ 2>/dev/null || true
-    '
+  ensure_cli_container
+  sync_cli_workspace
+
+  cli_exec "
+    cd '${CLI_WORKDIR}'
+    rm -rf crypto channel-artifacts/*
+    mkdir -p channel-artifacts
+    export FABRIC_CFG_PATH='${CLI_WORKDIR}'
+    cryptogen generate --config=crypto-config.yaml --output=crypto
+    configtxgen -profile EvidentiaCoCGenesis -outputBlock ./channel-artifacts/evidencechannel.block -channelID '${CHANNEL_NAME}'
+    cp crypto/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/msp/signcerts/Admin@evidentia.network-cert.pem crypto/ordererOrganizations/evidentia.network/msp/admincerts/ 2>/dev/null || true
+  "
+
+  rm -rf "$FABRIC_DIR/crypto-config" "$FABRIC_DIR/channel-artifacts"
+  docker cp "${CLI_CONTAINER_NAME}:${CLI_CRYPTO_BASE}" "$FABRIC_DIR/crypto-config"
+  docker cp "${CLI_CONTAINER_NAME}:${CLI_WORKDIR}/channel-artifacts" "$FABRIC_DIR/channel-artifacts"
 
   log_info "Crypto material and channel artifacts generated via Docker container."
 }
