@@ -567,6 +567,7 @@ deploy_chaincode_legacy() {
   cli_exec "
     rm -f '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz'
     cd '${CLI_CHAINCODE_PATH}'
+    GO111MODULE=on go mod tidy
     GO111MODULE=on go mod vendor
   "
 
