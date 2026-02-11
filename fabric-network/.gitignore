@@ -1,0 +1,7 @@
+crypto-config/
+channel-artifacts/
+*.block
+*.tx
+*.tar.gz
+*.log
+*.db
