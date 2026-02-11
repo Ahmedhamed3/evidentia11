@@ -5,7 +5,6 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FABRIC_DIR="$PROJECT_ROOT/fabric-network"
-FABRIC_SCRIPTS_DIR="$FABRIC_DIR/scripts"
 FABRIC_DOCKER_DIR="$FABRIC_DIR/docker"
 BACKEND_DIR="$PROJECT_ROOT/backend"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
@@ -16,6 +15,7 @@ PID_DIR="$RUNTIME_DIR/pids"
 CHANNEL_NAME="${CHANNEL_NAME:-evidence-channel}"
 CHAINCODE_NAME="${CHAINCODE_NAME:-evidence-coc}"
 CHAINCODE_VERSION="${CHAINCODE_VERSION:-1.0}"
+CHAINCODE_SEQUENCE="${CHAINCODE_SEQUENCE:-1}"
 BACKEND_PORT="${BACKEND_PORT:-3001}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 IPFS_API_URL="${IPFS_API_URL:-http://localhost:5001/api/v0/version}"
@@ -27,6 +27,14 @@ GATEWAY_RETRY_SLEEP="${GATEWAY_RETRY_SLEEP:-3}"
 
 # Optional override to force CCaaS deploy path when available.
 CHAINCODE_DEPLOY_MODE="${CHAINCODE_DEPLOY_MODE:-auto}"  # auto|ccaas|legacy
+
+CLI_CONTAINER_NAME="${CLI_CONTAINER_NAME:-cli}"
+CLI_WORKDIR="/opt/gopath/src/github.com/hyperledger/fabric/peer"
+CLI_CRYPTO_BASE="$CLI_WORKDIR/crypto"
+CLI_ORDERER_CA="$CLI_CRYPTO_BASE/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/msp/tlscacerts/tlsca.evidentia.network-cert.pem"
+CLI_ORDERER_ADMIN_CERT="$CLI_CRYPTO_BASE/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/tls/server.crt"
+CLI_ORDERER_ADMIN_KEY="$CLI_CRYPTO_BASE/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/tls/server.key"
+CLI_CHAINCODE_PATH="$CLI_WORKDIR/chaincode/${CHAINCODE_NAME}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -92,10 +100,6 @@ verify_prereqs() {
   require_cmd jq
   require_cmd node
   require_cmd npm
-  require_cmd peer
-  require_cmd cryptogen
-  require_cmd configtxgen
-  require_cmd osnadmin
 
   if ! docker compose version >/dev/null 2>&1; then
     log_error "Docker Compose v2 is required (docker compose)."
@@ -142,6 +146,74 @@ wait_until() {
   return 1
 }
 
+# Execute a command in the Fabric CLI container.
+cli_exec() {
+  docker exec "$CLI_CONTAINER_NAME" bash -lc "$*"
+}
+
+# Write command output from CLI container to stdout (without failing set -e pipeline usage).
+cli_exec_capture() {
+  docker exec "$CLI_CONTAINER_NAME" bash -lc "$*"
+}
+
+fabric_peer_env() {
+  local org="$1"
+  case "$org" in
+    LawEnforcement)
+      cat <<EOF_ENV
+export CORE_PEER_LOCALMSPID=LawEnforcementMSP
+export CORE_PEER_TLS_ENABLED=true
+export CORE_PEER_ADDRESS=peer0.lawenforcement.evidentia.network:7051
+export CORE_PEER_TLS_ROOTCERT_FILE=${CLI_CRYPTO_BASE}/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/ca.crt
+export CORE_PEER_MSPCONFIGPATH=${CLI_CRYPTO_BASE}/peerOrganizations/lawenforcement.evidentia.network/users/Admin@lawenforcement.evidentia.network/msp
+EOF_ENV
+      ;;
+    ForensicLab)
+      cat <<EOF_ENV
+export CORE_PEER_LOCALMSPID=ForensicLabMSP
+export CORE_PEER_TLS_ENABLED=true
+export CORE_PEER_ADDRESS=peer0.forensiclab.evidentia.network:9051
+export CORE_PEER_TLS_ROOTCERT_FILE=${CLI_CRYPTO_BASE}/peerOrganizations/forensiclab.evidentia.network/peers/peer0.forensiclab.evidentia.network/tls/ca.crt
+export CORE_PEER_MSPCONFIGPATH=${CLI_CRYPTO_BASE}/peerOrganizations/forensiclab.evidentia.network/users/Admin@forensiclab.evidentia.network/msp
+EOF_ENV
+      ;;
+    Judiciary)
+      cat <<EOF_ENV
+export CORE_PEER_LOCALMSPID=JudiciaryMSP
+export CORE_PEER_TLS_ENABLED=true
+export CORE_PEER_ADDRESS=peer0.judiciary.evidentia.network:11051
+export CORE_PEER_TLS_ROOTCERT_FILE=${CLI_CRYPTO_BASE}/peerOrganizations/judiciary.evidentia.network/peers/peer0.judiciary.evidentia.network/tls/ca.crt
+export CORE_PEER_MSPCONFIGPATH=${CLI_CRYPTO_BASE}/peerOrganizations/judiciary.evidentia.network/users/Admin@judiciary.evidentia.network/msp
+EOF_ENV
+      ;;
+    *)
+      log_error "Unknown org requested for peer env: $org"
+      exit 1
+      ;;
+  esac
+}
+
+with_peer_env() {
+  local org="$1"
+  local cmd="$2"
+  local env_block
+  env_block="$(fabric_peer_env "$org")"
+  cli_exec "${env_block}; ${cmd}"
+}
+
+ensure_cli_container() {
+  CURRENT_STAGE="fabric CLI container readiness"
+
+  if container_running "$CLI_CONTAINER_NAME"; then
+    log_info "Fabric CLI container '${CLI_CONTAINER_NAME}' is already running."
+    return 0
+  fi
+
+  log_step "Starting Fabric CLI container '${CLI_CONTAINER_NAME}'"
+  (cd "$FABRIC_DOCKER_DIR" && run_compose -f docker-compose-fabric.yaml up -d "$CLI_CONTAINER_NAME")
+  wait_until "CLI container ${CLI_CONTAINER_NAME} running" "$RETRY_MAX" "$RETRY_SLEEP" "docker ps --format '{{.Names}}' | grep -Fxq '${CLI_CONTAINER_NAME}'"
+}
+
 ensure_crypto_material() {
   CURRENT_STAGE="crypto material verification"
   if [[ -d "$FABRIC_DIR/crypto-config" && -f "$FABRIC_DIR/channel-artifacts/evidencechannel.block" ]]; then
@@ -149,8 +221,22 @@ ensure_crypto_material() {
     return 0
   fi
 
-  log_step "Generating crypto material and channel artifacts"
-  (cd "$FABRIC_DIR" && "$FABRIC_SCRIPTS_DIR/generate.sh")
+  log_step "Generating crypto material and channel artifacts (Dockerized fabric-tools)"
+  rm -rf "$FABRIC_DIR/crypto-config" "$FABRIC_DIR/channel-artifacts"
+  mkdir -p "$FABRIC_DIR/channel-artifacts"
+
+  docker run --rm \
+    -v "$FABRIC_DIR":/workspace/fabric-network \
+    -w /workspace/fabric-network \
+    -e FABRIC_CFG_PATH=/workspace/fabric-network \
+    hyperledger/fabric-tools:2.5.10 \
+    bash -lc '
+      cryptogen generate --config=crypto-config.yaml --output=crypto-config
+      configtxgen -profile EvidentiaCoCGenesis -outputBlock ./channel-artifacts/evidencechannel.block -channelID evidence-channel
+      cp crypto-config/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/msp/signcerts/Admin@evidentia.network-cert.pem crypto-config/ordererOrganizations/evidentia.network/msp/admincerts/ 2>/dev/null || true
+    '
+
+  log_info "Crypto material and channel artifacts generated via Docker container."
 }
 
 start_fabric_network_if_needed() {
@@ -164,6 +250,7 @@ start_fabric_network_if_needed() {
     couchdb.forensiclab
     couchdb.judiciary
     ipfs.evidentia.network
+    "$CLI_CONTAINER_NAME"
   )
 
   local all_running=true
@@ -175,7 +262,7 @@ start_fabric_network_if_needed() {
   done
 
   if [[ "$all_running" == "true" ]]; then
-    log_info "Fabric + CouchDB + IPFS containers are already running."
+    log_info "Fabric + CouchDB + IPFS + CLI containers are already running."
     return 0
   fi
 
@@ -185,6 +272,7 @@ start_fabric_network_if_needed() {
   (cd "$FABRIC_DOCKER_DIR" && run_compose -f docker-compose-ipfs.yaml up -d)
 
   verify_required_containers
+  ensure_cli_container
 }
 
 verify_required_containers() {
@@ -198,6 +286,7 @@ verify_required_containers() {
     couchdb.forensiclab
     couchdb.judiciary
     ipfs.evidentia.network
+    "$CLI_CONTAINER_NAME"
   )
 
   for c in "${required[@]}"; do
@@ -205,72 +294,143 @@ verify_required_containers() {
   done
 }
 
-fabric_env_law() {
-  export CORE_PEER_LOCALMSPID="LawEnforcementMSP"
-  export CORE_PEER_TLS_ENABLED=true
-  export CORE_PEER_TLS_ROOTCERT_FILE="$FABRIC_DIR/crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/ca.crt"
-  export CORE_PEER_MSPCONFIGPATH="$FABRIC_DIR/crypto-config/peerOrganizations/lawenforcement.evidentia.network/users/Admin@lawenforcement.evidentia.network/msp"
-  export CORE_PEER_ADDRESS="localhost:7051"
-}
-
 channel_exists() {
   CURRENT_STAGE="channel existence check"
-  local orderer_tls_ca="$FABRIC_DIR/crypto-config/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/msp/tlscacerts/tlsca.evidentia.network-cert.pem"
-  local orderer_admin_cert="$FABRIC_DIR/crypto-config/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/tls/server.crt"
-  local orderer_admin_key="$FABRIC_DIR/crypto-config/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/tls/server.key"
+  ensure_cli_container
 
-  osnadmin channel list -o localhost:7053 --ca-file "$orderer_tls_ca" --client-cert "$orderer_admin_cert" --client-key "$orderer_admin_key" 2>/dev/null \
-    | grep -q "\"name\": \"${CHANNEL_NAME}\""
+  cli_exec "
+    osnadmin channel list -o orderer.evidentia.network:7053 \
+      --ca-file '${CLI_ORDERER_CA}' \
+      --client-cert '${CLI_ORDERER_ADMIN_CERT}' \
+      --client-key '${CLI_ORDERER_ADMIN_KEY}' 2>/dev/null | grep -q '\"name\": \"${CHANNEL_NAME}\"'
+  "
+}
+
+join_channel_for_org() {
+  local org="$1"
+  local join_cmd="peer channel join -b ${CLI_WORKDIR}/channel-artifacts/evidencechannel.block"
+
+  log_info "Joining ${org} peer to channel '${CHANNEL_NAME}'"
+  local attempt=1
+  while (( attempt <= RETRY_MAX )); do
+    if with_peer_env "$org" "$join_cmd" >/dev/null 2>&1; then
+      log_info "${org} joined '${CHANNEL_NAME}'."
+      return 0
+    fi
+    log_warn "Join failed for ${org}, retrying (${attempt}/${RETRY_MAX})"
+    sleep "$RETRY_SLEEP"
+    ((attempt++))
+  done
+
+  log_error "Failed to join ${org} peer to channel '${CHANNEL_NAME}'."
+  exit 1
 }
 
 ensure_channel() {
   CURRENT_STAGE="channel creation"
+  ensure_cli_container
+
   if channel_exists; then
     log_info "Channel '${CHANNEL_NAME}' already exists."
-    return 0
+  else
+    log_step "Creating channel '${CHANNEL_NAME}' via CLI container"
+    cli_exec "
+      osnadmin channel join \
+        --channelID '${CHANNEL_NAME}' \
+        --config-block '${CLI_WORKDIR}/channel-artifacts/evidencechannel.block' \
+        -o orderer.evidentia.network:7053 \
+        --ca-file '${CLI_ORDERER_CA}' \
+        --client-cert '${CLI_ORDERER_ADMIN_CERT}' \
+        --client-key '${CLI_ORDERER_ADMIN_KEY}'
+    "
+    log_info "Channel '${CHANNEL_NAME}' created."
   fi
 
-  log_step "Creating and joining channel '${CHANNEL_NAME}'"
-  (cd "$FABRIC_DIR" && "$FABRIC_SCRIPTS_DIR/channel.sh")
+  join_channel_for_org "LawEnforcement"
+  join_channel_for_org "ForensicLab"
+  join_channel_for_org "Judiciary"
+}
+
+query_installed_package_id() {
+  with_peer_env "LawEnforcement" "peer lifecycle chaincode queryinstalled" \
+    | awk -v label="${CHAINCODE_NAME}_${CHAINCODE_VERSION}" '$0 ~ label {gsub(/,$/, "", $3); print $3; exit}'
 }
 
 chaincode_committed() {
-  fabric_env_law
-  peer lifecycle chaincode querycommitted -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" 2>/dev/null | grep -q "Version: ${CHAINCODE_VERSION}"
+  with_peer_env "LawEnforcement" "peer lifecycle chaincode querycommitted -C '${CHANNEL_NAME}' -n '${CHAINCODE_NAME}'" 2>/dev/null \
+    | grep -q "Version: ${CHAINCODE_VERSION}"
 }
 
-deploy_chaincode() {
-  CURRENT_STAGE="chaincode deployment"
+deploy_chaincode_legacy() {
+  CURRENT_STAGE="chaincode deployment (legacy lifecycle via CLI container)"
+  ensure_cli_container
+
   if chaincode_committed; then
     log_info "Chaincode '${CHAINCODE_NAME}' already committed on channel '${CHANNEL_NAME}'."
     return 0
   fi
 
-  log_step "Deploying chaincode '${CHAINCODE_NAME}'"
-  local ccaas_bash="$FABRIC_SCRIPTS_DIR/deploy-chaincode-ccaas.sh"
-  local ccaas_ps1="$FABRIC_SCRIPTS_DIR/Deploy-Chaincode-CCaaS.ps1"
+  log_step "Packaging and installing chaincode (${CHAINCODE_NAME}) in CLI container"
+  cli_exec "
+    rm -f '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz'
+    cd '${CLI_CHAINCODE_PATH}'
+    GO111MODULE=on go mod vendor
+  "
+
+  with_peer_env "LawEnforcement" "peer lifecycle chaincode package '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz' --path '${CLI_CHAINCODE_PATH}' --lang golang --label '${CHAINCODE_NAME}_${CHAINCODE_VERSION}'"
+
+  with_peer_env "LawEnforcement" "peer lifecycle chaincode install '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz'"
+  with_peer_env "ForensicLab" "peer lifecycle chaincode install '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz'"
+  with_peer_env "Judiciary" "peer lifecycle chaincode install '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz'"
+
+  local package_id
+  package_id="$(query_installed_package_id)"
+  if [[ -z "$package_id" ]]; then
+    log_error "Could not determine package ID for ${CHAINCODE_NAME}_${CHAINCODE_VERSION}"
+    exit 1
+  fi
+  log_info "Package ID resolved: ${package_id}"
+
+  local cc_collections="${CLI_WORKDIR}/collections_config.json"
+
+  with_peer_env "LawEnforcement" "peer lifecycle chaincode approveformyorg -o orderer.evidentia.network:7050 --ordererTLSHostnameOverride orderer.evidentia.network --channelID '${CHANNEL_NAME}' --name '${CHAINCODE_NAME}' --version '${CHAINCODE_VERSION}' --package-id '${package_id}' --sequence '${CHAINCODE_SEQUENCE}' --tls --cafile '${CLI_ORDERER_CA}' --collections-config '${cc_collections}'"
+  with_peer_env "ForensicLab" "peer lifecycle chaincode approveformyorg -o orderer.evidentia.network:7050 --ordererTLSHostnameOverride orderer.evidentia.network --channelID '${CHANNEL_NAME}' --name '${CHAINCODE_NAME}' --version '${CHAINCODE_VERSION}' --package-id '${package_id}' --sequence '${CHAINCODE_SEQUENCE}' --tls --cafile '${CLI_ORDERER_CA}' --collections-config '${cc_collections}'"
+  with_peer_env "Judiciary" "peer lifecycle chaincode approveformyorg -o orderer.evidentia.network:7050 --ordererTLSHostnameOverride orderer.evidentia.network --channelID '${CHANNEL_NAME}' --name '${CHAINCODE_NAME}' --version '${CHAINCODE_VERSION}' --package-id '${package_id}' --sequence '${CHAINCODE_SEQUENCE}' --tls --cafile '${CLI_ORDERER_CA}' --collections-config '${cc_collections}'"
+
+  log_step "Committing chaincode definition"
+  with_peer_env "LawEnforcement" "peer lifecycle chaincode commit -o orderer.evidentia.network:7050 --ordererTLSHostnameOverride orderer.evidentia.network --channelID '${CHANNEL_NAME}' --name '${CHAINCODE_NAME}' --version '${CHAINCODE_VERSION}' --sequence '${CHAINCODE_SEQUENCE}' --tls --cafile '${CLI_ORDERER_CA}' --peerAddresses peer0.lawenforcement.evidentia.network:7051 --tlsRootCertFiles '${CLI_CRYPTO_BASE}/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/ca.crt' --peerAddresses peer0.forensiclab.evidentia.network:9051 --tlsRootCertFiles '${CLI_CRYPTO_BASE}/peerOrganizations/forensiclab.evidentia.network/peers/peer0.forensiclab.evidentia.network/tls/ca.crt' --peerAddresses peer0.judiciary.evidentia.network:11051 --tlsRootCertFiles '${CLI_CRYPTO_BASE}/peerOrganizations/judiciary.evidentia.network/peers/peer0.judiciary.evidentia.network/tls/ca.crt' --collections-config '${cc_collections}'"
+
+  with_peer_env "LawEnforcement" "peer lifecycle chaincode querycommitted -C '${CHANNEL_NAME}' -n '${CHAINCODE_NAME}'"
+}
+
+deploy_chaincode_ccaas() {
+  CURRENT_STAGE="chaincode deployment (CCaaS script via CLI container)"
+  ensure_cli_container
+  log_step "Running CCaaS deployment script inside CLI container"
+  cli_exec "cd '${CLI_WORKDIR}' && ./scripts/deploy-chaincode-ccaas.sh"
+}
+
+deploy_chaincode() {
+  if chaincode_committed; then
+    log_info "Chaincode '${CHAINCODE_NAME}' already committed on channel '${CHANNEL_NAME}'."
+    return 0
+  fi
 
   case "$CHAINCODE_DEPLOY_MODE" in
     ccaas)
-      if [[ -x "$ccaas_bash" ]]; then
-        (cd "$FABRIC_DIR" && "$ccaas_bash")
-      elif command -v pwsh >/dev/null 2>&1 && [[ -f "$ccaas_ps1" ]]; then
-        (cd "$FABRIC_DIR" && pwsh -File "$ccaas_ps1")
-      else
-        log_warn "CCaaS mode requested but no compatible CCaaS deploy script available; falling back to legacy deploy script."
-        (cd "$FABRIC_DIR" && "$FABRIC_SCRIPTS_DIR/deploy-chaincode.sh")
-      fi
+      deploy_chaincode_ccaas
       ;;
     legacy)
-      (cd "$FABRIC_DIR" && "$FABRIC_SCRIPTS_DIR/deploy-chaincode.sh")
+      deploy_chaincode_legacy
       ;;
     auto|*)
-      if [[ -x "$ccaas_bash" ]]; then
-        (cd "$FABRIC_DIR" && "$ccaas_bash")
-      elif command -v pwsh >/dev/null 2>&1 && [[ -f "$ccaas_ps1" ]]; then
-        (cd "$FABRIC_DIR" && pwsh -File "$ccaas_ps1")
+      if cli_exec "test -x '${CLI_WORKDIR}/scripts/deploy-chaincode-ccaas.sh'" >/dev/null 2>&1; then
+        if ! deploy_chaincode_ccaas; then
+          log_warn "CCaaS deploy path failed; falling back to legacy lifecycle deployment."
+          deploy_chaincode_legacy
+        fi
       else
-        (cd "$FABRIC_DIR" && "$FABRIC_SCRIPTS_DIR/deploy-chaincode.sh")
+        deploy_chaincode_legacy
       fi
       ;;
   esac
@@ -279,7 +439,7 @@ deploy_chaincode() {
 verify_chaincode_runtime() {
   CURRENT_STAGE="chaincode runtime verification"
 
-  wait_until "chaincode committed on channel" "$RETRY_MAX" "$RETRY_SLEEP" "bash -lc 'source /dev/null 2>/dev/null; export CORE_PEER_LOCALMSPID=LawEnforcementMSP CORE_PEER_TLS_ENABLED=true CORE_PEER_TLS_ROOTCERT_FILE=\"$FABRIC_DIR/crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/ca.crt\" CORE_PEER_MSPCONFIGPATH=\"$FABRIC_DIR/crypto-config/peerOrganizations/lawenforcement.evidentia.network/users/Admin@lawenforcement.evidentia.network/msp\" CORE_PEER_ADDRESS=localhost:7051; peer lifecycle chaincode querycommitted -C \"$CHANNEL_NAME\" -n \"$CHAINCODE_NAME\" | grep -q \"Version: $CHAINCODE_VERSION\"'"
+  wait_until "chaincode committed on channel" "$RETRY_MAX" "$RETRY_SLEEP" "docker exec ${CLI_CONTAINER_NAME} bash -lc \"$(fabric_peer_env LawEnforcement); peer lifecycle chaincode querycommitted -C '${CHANNEL_NAME}' -n '${CHAINCODE_NAME}' | grep -q 'Version: ${CHAINCODE_VERSION}'\""
 
   wait_until "chaincode container process" "$RETRY_MAX" "$RETRY_SLEEP" "docker ps --format '{{.Names}}' | grep -E '(${CHAINCODE_NAME}|dev-peer.*${CHAINCODE_NAME})'"
 }
@@ -373,6 +533,7 @@ stop_app_if_running() {
 
 full_test_sequence() {
   CURRENT_STAGE="post-start test sequence"
+  ensure_cli_container
   log_step "Running full validation sequence"
 
   # A) docker ps validation
@@ -388,6 +549,7 @@ full_test_sequence() {
     couchdb.forensiclab
     couchdb.judiciary
     ipfs.evidentia.network
+    "$CLI_CONTAINER_NAME"
   )
   for c in "${expected[@]}"; do
     container_running "$c" || { log_error "Test failure at stage A: missing container ${c}"; exit 1; }
@@ -415,20 +577,26 @@ full_test_sequence() {
     -H 'x-api-key: demo-tool-key' \
     -d "$tx_payload" >/dev/null || { log_error "Test failure at stage C: transaction submission failed"; exit 1; }
 
-  # D) query ledger state to verify transaction committed
+  # D) query ledger state to verify transaction committed through backend
   log_info "D) Querying ledger state through backend"
   local query_json
   query_json="$(curl -fsS "http://localhost:${BACKEND_PORT}/api/forensic/evidence/${evidence_id}" -H 'x-api-key: demo-tool-key')"
   echo "$query_json" | jq -e '.success == true and .data.evidenceId != null' >/dev/null || { log_error "Test failure at stage D: evidence query failed"; exit 1; }
 
-  # E) IPFS version endpoint
-  log_info "E) Querying IPFS version endpoint"
+  # E) invoke/query ledger directly using peer CLI inside docker container
+  log_info "E) Verifying ledger directly from CLI container"
+  with_peer_env "LawEnforcement" "peer chaincode query -C '${CHANNEL_NAME}' -n '${CHAINCODE_NAME}' -c '{\"function\":\"GetEvidence\",\"Args\":[\"${evidence_id}\"]}'" \
+    | tee "$LOG_DIR/chaincode-query.txt" \
+    | grep -q "$evidence_id" || { log_error "Test failure at stage E: chaincode query did not return expected evidence"; exit 1; }
+
+  # F) IPFS version endpoint
+  log_info "F) Querying IPFS version endpoint"
   local ipfs_json
   ipfs_json="$(curl -fsS "$IPFS_API_URL")"
-  echo "$ipfs_json" | jq . >/dev/null || { log_error "Test failure at stage E: IPFS API not responding"; exit 1; }
+  echo "$ipfs_json" | jq . >/dev/null || { log_error "Test failure at stage F: IPFS API not responding"; exit 1; }
 
-  # F)
-  log_info "F) SUCCESS: all startup and validation checks passed."
+  # G)
+  log_info "G) SUCCESS: all startup and validation checks passed."
 }
 
 start_flow() {
@@ -443,6 +611,7 @@ start_flow() {
   ensure_crypto_material
   start_fabric_network_if_needed
   verify_required_containers
+  ensure_cli_container
   ensure_channel
   deploy_chaincode
   verify_chaincode_runtime
@@ -482,6 +651,7 @@ reset_flow() {
   ensure_crypto_material
   start_fabric_network_if_needed
   verify_required_containers
+  ensure_cli_container
   ensure_channel
   deploy_chaincode
   verify_chaincode_runtime
@@ -512,8 +682,8 @@ status_flow() {
   fi
 
   echo
-  log_info "Fabric/CouchDB/IPFS containers:"
-  docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | awk 'NR==1 || /orderer\.evidentia\.network|peer0\.|couchdb\.|ipfs\.evidentia\.network/'
+  log_info "Fabric/CouchDB/IPFS/CLI containers:"
+  docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | awk 'NR==1 || /orderer\.evidentia\.network|peer0\.|couchdb\.|ipfs\.evidentia\.network|^cli/'
 
   echo
   if docker ps --format '{{.Names}}' | grep -E "(${CHAINCODE_NAME}|dev-peer.*${CHAINCODE_NAME})" >/dev/null 2>&1; then
@@ -539,6 +709,12 @@ status_flow() {
     log_info "IPFS endpoint: HEALTHY"
   else
     log_warn "IPFS endpoint: UNREACHABLE"
+  fi
+
+  if container_running "$CLI_CONTAINER_NAME"; then
+    log_info "CLI container (${CLI_CONTAINER_NAME}): RUNNING"
+  else
+    log_warn "CLI container (${CLI_CONTAINER_NAME}): NOT RUNNING"
   fi
 }
 
