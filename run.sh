@@ -166,6 +166,12 @@ sync_path_to_cli() {
     return 0
   fi
 
+  if docker inspect "$CLI_CONTAINER_NAME" --format '{{json .Mounts}}' 2>/dev/null \
+    | jq -e --arg target "$target_path" '.[] | select(.Destination == $target)' >/dev/null 2>&1; then
+    log_info "Skipping docker cp for mounted CLI path: ${target_path}"
+    return 0
+  fi
+
   cli_exec "mkdir -p '$(dirname "$target_path")' && rm -rf '$target_path'"
   docker cp "$source_path" "${CLI_CONTAINER_NAME}:${target_path}"
 }
@@ -274,6 +280,7 @@ ensure_crypto_material() {
 
   log_step "Generating crypto material and channel artifacts (Dockerized fabric-tools)"
   rm -rf "$FABRIC_DIR/crypto-config" "$FABRIC_DIR/channel-artifacts"
+  mkdir -p "$FABRIC_DIR/crypto-config"
   mkdir -p "$FABRIC_DIR/channel-artifacts"
 
   ensure_cli_container
@@ -281,17 +288,11 @@ ensure_crypto_material() {
 
   cli_exec "
     cd '${CLI_WORKDIR}'
-    rm -rf crypto channel-artifacts/*
-    mkdir -p channel-artifacts
     export FABRIC_CFG_PATH='${CLI_WORKDIR}'
     cryptogen generate --config=crypto-config.yaml --output=crypto
     configtxgen -profile EvidentiaCoCGenesis -outputBlock ./channel-artifacts/evidencechannel.block -channelID '${CHANNEL_NAME}'
     cp crypto/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/msp/signcerts/Admin@evidentia.network-cert.pem crypto/ordererOrganizations/evidentia.network/msp/admincerts/ 2>/dev/null || true
   "
-
-  rm -rf "$FABRIC_DIR/crypto-config" "$FABRIC_DIR/channel-artifacts"
-  docker cp "${CLI_CONTAINER_NAME}:${CLI_CRYPTO_BASE}" "$FABRIC_DIR/crypto-config"
-  docker cp "${CLI_CONTAINER_NAME}:${CLI_WORKDIR}/channel-artifacts" "$FABRIC_DIR/channel-artifacts"
 
   log_info "Crypto material and channel artifacts generated via Docker container."
 }
