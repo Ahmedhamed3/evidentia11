@@ -456,6 +456,33 @@ submit_anchor_update_for_org() {
   with_peer_env "$org" "peer channel update -o orderer.evidentia.network:7050 --ordererTLSHostnameOverride orderer.evidentia.network -c '${CHANNEL_NAME}' -f '${CLI_WORKDIR}/channel-artifacts/${anchor_file}' --tls --cafile '${CLI_ORDERER_CA}'"
 }
 
+verify_anchor_peers_in_channel_block() {
+  CURRENT_STAGE="anchor peer validation"
+
+  local channel_block="${CLI_WORKDIR}/channel-artifacts/${CHANNEL_BLOCK_FILE}"
+  local inspect_file="${CLI_WORKDIR}/channel-artifacts/${CHANNEL_BLOCK_FILE}.json"
+
+  cli_exec "
+    cd '${CLI_WORKDIR}'
+    configtxgen -inspectBlock '${channel_block}' > '${inspect_file}'
+  "
+
+  cli_exec "jq -e '.data.data[0].payload.data.config.channel_group.groups.Application.groups.LawEnforcementMSP.values.AnchorPeers.value.anchor_peers[] | select(.host == \"peer0.lawenforcement.evidentia.network\" and .port == 7051)' '${inspect_file}' >/dev/null"
+  cli_exec "jq -e '.data.data[0].payload.data.config.channel_group.groups.Application.groups.ForensicLabMSP.values.AnchorPeers.value.anchor_peers[] | select(.host == \"peer0.forensiclab.evidentia.network\" and .port == 9051)' '${inspect_file}' >/dev/null"
+  cli_exec "jq -e '.data.data[0].payload.data.config.channel_group.groups.Application.groups.JudiciaryMSP.values.AnchorPeers.value.anchor_peers[] | select(.host == \"peer0.judiciary.evidentia.network\" and .port == 11051)' '${inspect_file}' >/dev/null"
+
+  log_info "Anchor peers are already embedded in the channel config block and active at channel creation time."
+}
+
+configure_anchor_peers() {
+  CURRENT_STAGE="anchor peer configuration"
+
+  # In channel participation mode (osnadmin/no system channel), this network embeds
+  # anchor peer values directly in the application channel profile. Submitting separate
+  # pre-generated anchor update tx files can fail with stale ReadSet versions.
+  verify_anchor_peers_in_channel_block
+}
+
 ensure_channel() {
   CURRENT_STAGE="channel creation"
   ensure_cli_container
@@ -481,10 +508,7 @@ ensure_channel() {
   join_channel_for_org "ForensicLab"
   join_channel_for_org "Judiciary"
 
-  # Anchor peer updates are generated during artifact creation and submitted after peers join.
-  submit_anchor_update_for_org "LawEnforcement" "LawEnforcementMSPanchors.tx"
-  submit_anchor_update_for_org "ForensicLab" "ForensicLabMSPanchors.tx"
-  submit_anchor_update_for_org "Judiciary" "JudiciaryMSPanchors.tx"
+  configure_anchor_peers
 }
 
 query_installed_package_id() {
