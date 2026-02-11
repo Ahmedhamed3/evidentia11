@@ -14,7 +14,7 @@ PID_DIR="$RUNTIME_DIR/pids"
 
 CHANNEL_NAME="${CHANNEL_NAME:-evidence-channel}"
 CHANNEL_PROFILE="${CHANNEL_PROFILE:-EvidentiaCoCChannel}"
-SYSTEM_PROFILE="${SYSTEM_PROFILE:-EvidentiaCoCGenesis}"
+SYSTEM_PROFILE="${SYSTEM_PROFILE:-OrdererGenesis}"
 CHANNEL_BLOCK_FILE="${CHANNEL_NAME//-/}.block"
 CHAINCODE_NAME="${CHAINCODE_NAME:-evidence-coc}"
 CHAINCODE_VERSION="${CHAINCODE_VERSION:-1.0}"
@@ -35,10 +35,10 @@ CLI_CONTAINER_NAME="${CLI_CONTAINER_NAME:-cli}"
 CLI_IMAGE="${CLI_IMAGE:-hyperledger/fabric-tools:2.5.10}"
 CLI_NETWORK="${CLI_NETWORK:-evidentia_network}"
 CLI_WORKDIR="/opt/gopath/src/github.com/hyperledger/fabric/peer"
-CLI_CRYPTO_BASE="$CLI_WORKDIR/crypto"
+CLI_CRYPTO_BASE="$CLI_WORKDIR/crypto-config"
 CLI_ORDERER_CA="$CLI_CRYPTO_BASE/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/msp/tlscacerts/tlsca.evidentia.network-cert.pem"
-CLI_ORDERER_ADMIN_CERT="$CLI_CRYPTO_BASE/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/tls/server.crt"
-CLI_ORDERER_ADMIN_KEY="$CLI_CRYPTO_BASE/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/tls/server.key"
+CLI_ORDERER_ADMIN_CERT="$CLI_CRYPTO_BASE/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/tls/client.crt"
+CLI_ORDERER_ADMIN_KEY="$CLI_CRYPTO_BASE/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/tls/client.key"
 CLI_CHAINCODE_PATH="$CLI_WORKDIR/chaincode/${CHAINCODE_NAME}"
 
 RED='\033[0;31m'
@@ -309,7 +309,7 @@ ensure_crypto_material() {
     export FABRIC_CFG_PATH='${CLI_WORKDIR}'
     rm -rf ./crypto/* ./channel-artifacts/*
 
-    cryptogen generate --config=crypto-config.yaml --output=crypto
+    cryptogen generate --config=crypto-config.yaml --output=crypto-config
 
     # Generate required artifacts for both legacy workflows and osnadmin channel participation.
     configtxgen -profile '${SYSTEM_PROFILE}' -channelID system-channel -outputBlock ./channel-artifacts/genesis.block
@@ -320,7 +320,7 @@ ensure_crypto_material() {
     configtxgen -profile '${CHANNEL_PROFILE}' -channelID '${CHANNEL_NAME}' -asOrg ForensicLabOrg -outputAnchorPeersUpdate ./channel-artifacts/ForensicLabMSPanchors.tx
     configtxgen -profile '${CHANNEL_PROFILE}' -channelID '${CHANNEL_NAME}' -asOrg JudiciaryOrg -outputAnchorPeersUpdate ./channel-artifacts/JudiciaryMSPanchors.tx
 
-    cp crypto/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/msp/signcerts/Admin@evidentia.network-cert.pem crypto/ordererOrganizations/evidentia.network/msp/admincerts/ 2>/dev/null || true
+    cp crypto-config/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/msp/signcerts/Admin@evidentia.network-cert.pem crypto-config/ordererOrganizations/evidentia.network/msp/admincerts/ 2>/dev/null || true
   "
 
   for artifact in "${required_artifacts[@]}"; do
@@ -417,11 +417,27 @@ join_channel_for_org() {
 }
 
 verify_channel_artifacts_for_osnadmin() {
-  local channel_tx="${FABRIC_DIR}/channel-artifacts/channel.tx"
-  local channel_block="${FABRIC_DIR}/channel-artifacts/${CHANNEL_BLOCK_FILE}"
+  local required=(
+    "${FABRIC_DIR}/channel-artifacts/genesis.block"
+    "${FABRIC_DIR}/channel-artifacts/channel.tx"
+    "${FABRIC_DIR}/channel-artifacts/${CHANNEL_BLOCK_FILE}"
+    "${FABRIC_DIR}/channel-artifacts/LawEnforcementMSPanchors.tx"
+    "${FABRIC_DIR}/channel-artifacts/ForensicLabMSPanchors.tx"
+    "${FABRIC_DIR}/channel-artifacts/JudiciaryMSPanchors.tx"
+    "${FABRIC_DIR}/crypto-config/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/tls/ca.crt"
+    "${FABRIC_DIR}/crypto-config/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/tls/client.crt"
+    "${FABRIC_DIR}/crypto-config/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/tls/client.key"
+  )
 
-  if [[ ! -f "$channel_tx" || ! -f "$channel_block" ]]; then
-    log_error "Missing required channel artifacts. Expected both '$channel_tx' and '$channel_block' before running osnadmin."
+  local missing=0
+  for path in "${required[@]}"; do
+    if [[ ! -f "$path" ]]; then
+      log_error "Required file missing: $path"
+      missing=1
+    fi
+  done
+
+  if (( missing == 1 )); then
     log_error "Regenerate artifacts with: ./fabric-network/scripts/generate.sh"
     exit 1
   fi

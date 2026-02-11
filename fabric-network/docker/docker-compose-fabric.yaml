@@ -94,7 +94,8 @@ services:
       # Set Docker API version for compatibility
       - DOCKER_API_VERSION=1.44
     volumes:
-      - ../crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network:/etc/hyperledger/fabric
+      - ../crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/msp:/etc/hyperledger/fabric/msp
+      - ../crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls:/etc/hyperledger/fabric/tls
       - peer0.lawenforcement.evidentia.network:/var/hyperledger/production
       - ../peercfg:/etc/hyperledger/peercfg
     working_dir: /root
@@ -144,7 +145,8 @@ services:
       # Set Docker API version for compatibility
       - DOCKER_API_VERSION=1.44
     volumes:
-      - ../crypto-config/peerOrganizations/forensiclab.evidentia.network/peers/peer0.forensiclab.evidentia.network:/etc/hyperledger/fabric
+      - ../crypto-config/peerOrganizations/forensiclab.evidentia.network/peers/peer0.forensiclab.evidentia.network/msp:/etc/hyperledger/fabric/msp
+      - ../crypto-config/peerOrganizations/forensiclab.evidentia.network/peers/peer0.forensiclab.evidentia.network/tls:/etc/hyperledger/fabric/tls
       - peer0.forensiclab.evidentia.network:/var/hyperledger/production
       - ../peercfg:/etc/hyperledger/peercfg
     working_dir: /root
@@ -194,7 +196,8 @@ services:
       # Set Docker API version for compatibility
       - DOCKER_API_VERSION=1.44
     volumes:
-      - ../crypto-config/peerOrganizations/judiciary.evidentia.network/peers/peer0.judiciary.evidentia.network:/etc/hyperledger/fabric
+      - ../crypto-config/peerOrganizations/judiciary.evidentia.network/peers/peer0.judiciary.evidentia.network/msp:/etc/hyperledger/fabric/msp
+      - ../crypto-config/peerOrganizations/judiciary.evidentia.network/peers/peer0.judiciary.evidentia.network/tls:/etc/hyperledger/fabric/tls
       - peer0.judiciary.evidentia.network:/var/hyperledger/production
       - ../peercfg:/etc/hyperledger/peercfg
     working_dir: /root
@@ -221,14 +224,14 @@ services:
       - CORE_PEER_ADDRESS=peer0.lawenforcement.evidentia.network:7051
       - CORE_PEER_LOCALMSPID=LawEnforcementMSP
       - CORE_PEER_TLS_ENABLED=true
-      - CORE_PEER_TLS_CERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/server.crt
-      - CORE_PEER_TLS_KEY_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/server.key
-      - CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/ca.crt
-      - CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/lawenforcement.evidentia.network/users/Admin@lawenforcement.evidentia.network/msp
+      - CORE_PEER_TLS_CERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/ca.crt
+      - CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto-config/peerOrganizations/lawenforcement.evidentia.network/users/Admin@lawenforcement.evidentia.network/msp
     working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
     command: /bin/bash
     volumes:
-      - ../crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto
+      - ../crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto-config
       - ../channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
       - ../../chaincode:/opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode
       - ../scripts:/opt/gopath/src/github.com/hyperledger/fabric/peer/scripts
