@@ -167,6 +167,20 @@ Profiles:
       Organizations:
         - *OrdererOrg
       Capabilities: *OrdererCapabilities
+    Consortiums:
+      EvidentiaConsortium:
+        Organizations:
+          - *LawEnforcementOrg
+          - *ForensicLabOrg
+          - *JudiciaryOrg
+
+  # Application channel profile used to generate evidence-channel artifacts.
+  # This profile is consumed by configtxgen for:
+  # - channel.tx (legacy create channel transaction)
+  # - evidencechannel.block (participation API config block used by osnadmin channel join)
+  EvidentiaCoCChannel:
+    Consortium: EvidentiaConsortium
+    <<: *ChannelDefaults
     Application:
       <<: *ApplicationDefaults
       Organizations:
