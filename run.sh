@@ -13,6 +13,9 @@ LOG_DIR="$RUNTIME_DIR/logs"
 PID_DIR="$RUNTIME_DIR/pids"
 
 CHANNEL_NAME="${CHANNEL_NAME:-evidence-channel}"
+CHANNEL_PROFILE="${CHANNEL_PROFILE:-EvidentiaCoCChannel}"
+SYSTEM_PROFILE="${SYSTEM_PROFILE:-EvidentiaCoCGenesis}"
+CHANNEL_BLOCK_FILE="${CHANNEL_NAME//-/}.block"
 CHAINCODE_NAME="${CHAINCODE_NAME:-evidence-coc}"
 CHAINCODE_VERSION="${CHAINCODE_VERSION:-1.0}"
 CHAINCODE_SEQUENCE="${CHAINCODE_SEQUENCE:-1}"
@@ -273,15 +276,30 @@ ensure_cli_container() {
 
 ensure_crypto_material() {
   CURRENT_STAGE="crypto material verification"
-  if [[ -d "$FABRIC_DIR/crypto-config" && -f "$FABRIC_DIR/channel-artifacts/evidencechannel.block" ]]; then
-    log_info "Crypto materials and channel artifacts already exist."
-    return 0
+
+  local required_artifacts=(
+    "$FABRIC_DIR/channel-artifacts/genesis.block"
+    "$FABRIC_DIR/channel-artifacts/channel.tx"
+    "$FABRIC_DIR/channel-artifacts/$CHANNEL_BLOCK_FILE"
+    "$FABRIC_DIR/channel-artifacts/LawEnforcementMSPanchors.tx"
+    "$FABRIC_DIR/channel-artifacts/ForensicLabMSPanchors.tx"
+    "$FABRIC_DIR/channel-artifacts/JudiciaryMSPanchors.tx"
+  )
+
+  if [[ -d "$FABRIC_DIR/crypto-config" ]]; then
+    local all_present=true
+    for artifact in "${required_artifacts[@]}"; do
+      [[ -f "$artifact" ]] || { all_present=false; break; }
+    done
+    if [[ "$all_present" == "true" ]]; then
+      log_info "Crypto materials and all channel artifacts already exist."
+      return 0
+    fi
   fi
 
   log_step "Generating crypto material and channel artifacts (Dockerized fabric-tools)"
   rm -rf "$FABRIC_DIR/crypto-config" "$FABRIC_DIR/channel-artifacts"
-  mkdir -p "$FABRIC_DIR/crypto-config"
-  mkdir -p "$FABRIC_DIR/channel-artifacts"
+  mkdir -p "$FABRIC_DIR/crypto-config" "$FABRIC_DIR/channel-artifacts"
 
   ensure_cli_container
   sync_cli_workspace
@@ -289,14 +307,28 @@ ensure_crypto_material() {
   cli_exec "
     cd '${CLI_WORKDIR}'
     export FABRIC_CFG_PATH='${CLI_WORKDIR}'
+    rm -rf ./crypto/* ./channel-artifacts/*
+
     cryptogen generate --config=crypto-config.yaml --output=crypto
-    configtxgen -profile EvidentiaCoCGenesis -outputBlock ./channel-artifacts/evidencechannel.block -channelID '${CHANNEL_NAME}'
+
+    # Generate required artifacts for both legacy workflows and osnadmin channel participation.
+    configtxgen -profile '${SYSTEM_PROFILE}' -channelID system-channel -outputBlock ./channel-artifacts/genesis.block
+    configtxgen -profile '${CHANNEL_PROFILE}' -channelID '${CHANNEL_NAME}' -outputCreateChannelTx ./channel-artifacts/channel.tx
+    configtxgen -profile '${CHANNEL_PROFILE}' -channelID '${CHANNEL_NAME}' -outputBlock ./channel-artifacts/${CHANNEL_BLOCK_FILE}
+
+    configtxgen -profile '${CHANNEL_PROFILE}' -channelID '${CHANNEL_NAME}' -asOrg LawEnforcementOrg -outputAnchorPeersUpdate ./channel-artifacts/LawEnforcementMSPanchors.tx
+    configtxgen -profile '${CHANNEL_PROFILE}' -channelID '${CHANNEL_NAME}' -asOrg ForensicLabOrg -outputAnchorPeersUpdate ./channel-artifacts/ForensicLabMSPanchors.tx
+    configtxgen -profile '${CHANNEL_PROFILE}' -channelID '${CHANNEL_NAME}' -asOrg JudiciaryOrg -outputAnchorPeersUpdate ./channel-artifacts/JudiciaryMSPanchors.tx
+
     cp crypto/ordererOrganizations/evidentia.network/users/Admin@evidentia.network/msp/signcerts/Admin@evidentia.network-cert.pem crypto/ordererOrganizations/evidentia.network/msp/admincerts/ 2>/dev/null || true
   "
 
+  for artifact in "${required_artifacts[@]}"; do
+    [[ -f "$artifact" ]] || { log_error "Expected channel artifact missing after generation: $artifact"; exit 1; }
+  done
+
   log_info "Crypto material and channel artifacts generated via Docker container."
 }
-
 start_fabric_network_if_needed() {
   CURRENT_STAGE="fabric network startup"
   local required=(
@@ -366,7 +398,7 @@ channel_exists() {
 
 join_channel_for_org() {
   local org="$1"
-  local join_cmd="peer channel join -b ${CLI_WORKDIR}/channel-artifacts/evidencechannel.block"
+  local join_cmd="peer channel join -b ${CLI_WORKDIR}/channel-artifacts/${CHANNEL_BLOCK_FILE}"
 
   log_info "Joining ${org} peer to channel '${CHANNEL_NAME}'"
   local attempt=1
@@ -384,9 +416,34 @@ join_channel_for_org() {
   exit 1
 }
 
+verify_channel_artifacts_for_osnadmin() {
+  local channel_tx="${FABRIC_DIR}/channel-artifacts/channel.tx"
+  local channel_block="${FABRIC_DIR}/channel-artifacts/${CHANNEL_BLOCK_FILE}"
+
+  if [[ ! -f "$channel_tx" || ! -f "$channel_block" ]]; then
+    log_error "Missing required channel artifacts. Expected both '$channel_tx' and '$channel_block' before running osnadmin."
+    log_error "Regenerate artifacts with: ./fabric-network/scripts/generate.sh"
+    exit 1
+  fi
+}
+
+submit_anchor_update_for_org() {
+  local org="$1"
+  local anchor_file="$2"
+
+  if [[ ! -f "${FABRIC_DIR}/channel-artifacts/${anchor_file}" ]]; then
+    log_error "Missing anchor peer update transaction: ${FABRIC_DIR}/channel-artifacts/${anchor_file}"
+    exit 1
+  fi
+
+  log_info "Submitting anchor peer update for ${org}"
+  with_peer_env "$org" "peer channel update -o orderer.evidentia.network:7050 --ordererTLSHostnameOverride orderer.evidentia.network -c '${CHANNEL_NAME}' -f '${CLI_WORKDIR}/channel-artifacts/${anchor_file}' --tls --cafile '${CLI_ORDERER_CA}'"
+}
+
 ensure_channel() {
   CURRENT_STAGE="channel creation"
   ensure_cli_container
+  verify_channel_artifacts_for_osnadmin
 
   if channel_exists; then
     log_info "Channel '${CHANNEL_NAME}' already exists."
@@ -395,7 +452,7 @@ ensure_channel() {
     cli_exec "
       osnadmin channel join \
         --channelID '${CHANNEL_NAME}' \
-        --config-block '${CLI_WORKDIR}/channel-artifacts/evidencechannel.block' \
+        --config-block '${CLI_WORKDIR}/channel-artifacts/${CHANNEL_BLOCK_FILE}' \
         -o orderer.evidentia.network:7053 \
         --ca-file '${CLI_ORDERER_CA}' \
         --client-cert '${CLI_ORDERER_ADMIN_CERT}' \
@@ -407,6 +464,11 @@ ensure_channel() {
   join_channel_for_org "LawEnforcement"
   join_channel_for_org "ForensicLab"
   join_channel_for_org "Judiciary"
+
+  # Anchor peer updates are generated during artifact creation and submitted after peers join.
+  submit_anchor_update_for_org "LawEnforcement" "LawEnforcementMSPanchors.tx"
+  submit_anchor_update_for_org "ForensicLab" "ForensicLabMSPanchors.tx"
+  submit_anchor_update_for_org "Judiciary" "JudiciaryMSPanchors.tx"
 }
 
 query_installed_package_id() {
