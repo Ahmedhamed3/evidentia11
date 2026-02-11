@@ -1,0 +1,39 @@
+[
+  {
+    "name": "sensitiveEvidenceMetadata",
+    "policy": "OR('LawEnforcementMSP.member', 'ForensicLabMSP.member')",
+    "requiredPeerCount": 1,
+    "maxPeerCount": 3,
+    "blockToLive": 0,
+    "memberOnlyRead": true,
+    "memberOnlyWrite": true,
+    "endorsementPolicy": {
+      "signaturePolicy": "OR('LawEnforcementMSP.peer', 'ForensicLabMSP.peer')"
+    }
+  },
+  {
+    "name": "encryptionKeys",
+    "policy": "OR('LawEnforcementMSP.member', 'ForensicLabMSP.member', 'JudiciaryMSP.member')",
+    "requiredPeerCount": 1,
+    "maxPeerCount": 3,
+    "blockToLive": 0,
+    "memberOnlyRead": true,
+    "memberOnlyWrite": true,
+    "endorsementPolicy": {
+      "signaturePolicy": "OR('LawEnforcementMSP.peer', 'ForensicLabMSP.peer')"
+    }
+  },
+  {
+    "name": "judicialNotes",
+    "policy": "OR('JudiciaryMSP.member')",
+    "requiredPeerCount": 1,
+    "maxPeerCount": 1,
+    "blockToLive": 0,
+    "memberOnlyRead": true,
+    "memberOnlyWrite": true,
+    "endorsementPolicy": {
+      "signaturePolicy": "OR('JudiciaryMSP.peer')"
+    }
+  }
+]
+

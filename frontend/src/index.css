@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code, .font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Evidence status badges */
+.status-registered { @apply bg-blue-100 text-blue-800; }
+.status-in_custody { @apply bg-green-100 text-green-800; }
+.status-in_analysis { @apply bg-yellow-100 text-yellow-800; }
+.status-analyzed { @apply bg-purple-100 text-purple-800; }
+.status-under_review { @apply bg-orange-100 text-orange-800; }
+.status-admitted { @apply bg-emerald-100 text-emerald-800; }
+.status-rejected { @apply bg-red-100 text-red-800; }
+.status-archived { @apply bg-gray-100 text-gray-800; }
+
+/* Timeline connector */
+.timeline-connector {
+  @apply absolute left-4 top-8 -ml-px h-full w-0.5 bg-gray-200;
+}
+
+/* Card hover effect */
+.card-hover {
+  @apply transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5;
+}
+

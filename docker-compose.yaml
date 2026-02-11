@@ -1,0 +1,75 @@
+# Evidentia Chain-of-Custody System
+# Root Docker Compose for development convenience
+# 
+# This file orchestrates all components. For production, use individual
+# compose files in fabric-network/docker/
+
+version: '3.8'
+
+services:
+  # Include fabric network services
+  # Note: In production, start fabric network first using dedicated scripts
+  
+  # Backend API Gateway
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: evidentia-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - JWT_SECRET=development-secret-key
+      - FABRIC_CHANNEL_NAME=evidence-channel
+      - FABRIC_CHAINCODE_NAME=evidence-coc
+      - FABRIC_ORG=LawEnforcement
+      - FABRIC_CRYPTO_PATH=/app/crypto-config
+      - IPFS_HOST=ipfs.evidentia.network
+      - IPFS_PORT=5001
+    volumes:
+      - ./fabric-network/crypto-config:/app/crypto-config:ro
+    depends_on:
+      - ipfs
+    networks:
+      - evidentia_network
+
+  # Frontend UI
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: evidentia-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:3001
+    depends_on:
+      - backend
+    networks:
+      - evidentia_network
+
+  # IPFS for evidence storage
+  ipfs:
+    image: ipfs/kubo:v0.24.0
+    container_name: ipfs.evidentia.network
+    environment:
+      - IPFS_PROFILE=server
+    ports:
+      - "4001:4001"
+      - "5001:5001"
+      - "8080:8080"
+    volumes:
+      - ipfs_data:/data/ipfs
+    networks:
+      - evidentia_network
+
+networks:
+  evidentia_network:
+    external: true
+    name: evidentia_network
+
+volumes:
+  ipfs_data:
+

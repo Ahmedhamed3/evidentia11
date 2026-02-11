@@ -1,0 +1,31 @@
+{
+  "name": "forensic-tool-simulator",
+  "version": "1.0.0",
+  "description": "Simulated forensic tool for demonstrating Integration Gateway patterns",
+  "main": "dist/cli.js",
+  "bin": {
+    "forensic-sim": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "ts-node src/cli.ts",
+    "demo": "ts-node src/demo.ts"
+  },
+  "dependencies": {
+    "axios": "^1.6.5",
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "crypto-js": "^4.2.0",
+    "inquirer": "^8.2.6",
+    "ora": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
+    "@types/inquirer": "^8.2.10",
+    "@types/node": "^20.11.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
+

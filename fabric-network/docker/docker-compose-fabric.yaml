@@ -1,0 +1,241 @@
+# Copyright Evidentia Chain-of-Custody System
+# Docker Compose for Hyperledger Fabric Network Components
+
+volumes:
+  orderer.evidentia.network:
+  peer0.lawenforcement.evidentia.network:
+  peer0.forensiclab.evidentia.network:
+  peer0.judiciary.evidentia.network:
+
+networks:
+  evidentia:
+    name: evidentia_network
+
+services:
+  # Orderer Service
+  orderer.evidentia.network:
+    container_name: orderer.evidentia.network
+    image: hyperledger/fabric-orderer:2.5.10
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_LISTENPORT=7050
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
+      - ORDERER_GENERAL_TLS_ENABLED=true
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_CLUSTER_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_GENERAL_BOOTSTRAPMETHOD=none
+      - ORDERER_CHANNELPARTICIPATION_ENABLED=true
+      - ORDERER_ADMIN_TLS_ENABLED=true
+      - ORDERER_ADMIN_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_ADMIN_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_ADMIN_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_ADMIN_TLS_CLIENTROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_ADMIN_LISTENADDRESS=0.0.0.0:7053
+      - ORDERER_OPERATIONS_LISTENADDRESS=orderer.evidentia.network:9443
+      - ORDERER_METRICS_PROVIDER=prometheus
+    working_dir: /root
+    command: orderer
+    volumes:
+      - ../channel-artifacts/genesis.block:/var/hyperledger/orderer/orderer.genesis.block
+      - ../crypto-config/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/msp:/var/hyperledger/orderer/msp
+      - ../crypto-config/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/tls:/var/hyperledger/orderer/tls
+      - orderer.evidentia.network:/var/hyperledger/production/orderer
+    ports:
+      - 7050:7050
+      - 7053:7053
+      - 9443:9443
+    networks:
+      - evidentia
+
+  # Law Enforcement Peer
+  peer0.lawenforcement.evidentia.network:
+    container_name: peer0.lawenforcement.evidentia.network
+    image: hyperledger/fabric-peer:2.5.10
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_CFG_PATH=/etc/hyperledger/peercfg
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_PROFILE_ENABLED=false
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_ID=peer0.lawenforcement.evidentia.network
+      - CORE_PEER_ADDRESS=peer0.lawenforcement.evidentia.network:7051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.lawenforcement.evidentia.network:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.lawenforcement.evidentia.network:7051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.lawenforcement.evidentia.network:7051
+      - CORE_PEER_LOCALMSPID=LawEnforcementMSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_OPERATIONS_LISTENADDRESS=peer0.lawenforcement.evidentia.network:9444
+      - CORE_METRICS_PROVIDER=prometheus
+      - CHAINCODE_AS_A_SERVICE_BUILDER_CONFIG={"peername":"peer0lawenforcement"}
+      - CORE_CHAINCODE_EXECUTETIMEOUT=300s
+      # CouchDB settings
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb.lawenforcement:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      # Chaincode container network - CRITICAL for chaincode to resolve peer hostname
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=evidentia_network
+      # Use TCP endpoint for Docker on Windows Docker Desktop
+      - CORE_VM_ENDPOINT=tcp://host.docker.internal:2375
+      # Set Docker API version for compatibility
+      - DOCKER_API_VERSION=1.44
+    volumes:
+      - ../crypto-config/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network:/etc/hyperledger/fabric
+      - peer0.lawenforcement.evidentia.network:/var/hyperledger/production
+      - ../peercfg:/etc/hyperledger/peercfg
+    working_dir: /root
+    command: peer node start
+    ports:
+      - 7051:7051
+      - 9444:9444
+    networks:
+      - evidentia
+
+  # Forensic Lab Peer
+  peer0.forensiclab.evidentia.network:
+    container_name: peer0.forensiclab.evidentia.network
+    image: hyperledger/fabric-peer:2.5.10
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_CFG_PATH=/etc/hyperledger/peercfg
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_PROFILE_ENABLED=false
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_ID=peer0.forensiclab.evidentia.network
+      - CORE_PEER_ADDRESS=peer0.forensiclab.evidentia.network:9051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:9051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.forensiclab.evidentia.network:9052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:9052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.forensiclab.evidentia.network:9051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.forensiclab.evidentia.network:9051
+      - CORE_PEER_LOCALMSPID=ForensicLabMSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_OPERATIONS_LISTENADDRESS=peer0.forensiclab.evidentia.network:9445
+      - CORE_METRICS_PROVIDER=prometheus
+      - CHAINCODE_AS_A_SERVICE_BUILDER_CONFIG={"peername":"peer0forensiclab"}
+      - CORE_CHAINCODE_EXECUTETIMEOUT=300s
+      # CouchDB settings
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb.forensiclab:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      # Chaincode container network - CRITICAL for chaincode to resolve peer hostname
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=evidentia_network
+      # Use TCP endpoint for Docker on Windows Docker Desktop
+      - CORE_VM_ENDPOINT=tcp://host.docker.internal:2375
+      # Set Docker API version for compatibility
+      - DOCKER_API_VERSION=1.44
+    volumes:
+      - ../crypto-config/peerOrganizations/forensiclab.evidentia.network/peers/peer0.forensiclab.evidentia.network:/etc/hyperledger/fabric
+      - peer0.forensiclab.evidentia.network:/var/hyperledger/production
+      - ../peercfg:/etc/hyperledger/peercfg
+    working_dir: /root
+    command: peer node start
+    ports:
+      - 9051:9051
+      - 9445:9445
+    networks:
+      - evidentia
+
+  # Judiciary Peer
+  peer0.judiciary.evidentia.network:
+    container_name: peer0.judiciary.evidentia.network
+    image: hyperledger/fabric-peer:2.5.10
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_CFG_PATH=/etc/hyperledger/peercfg
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_PROFILE_ENABLED=false
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_ID=peer0.judiciary.evidentia.network
+      - CORE_PEER_ADDRESS=peer0.judiciary.evidentia.network:11051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:11051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.judiciary.evidentia.network:11052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:11052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.judiciary.evidentia.network:11051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.judiciary.evidentia.network:11051
+      - CORE_PEER_LOCALMSPID=JudiciaryMSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_OPERATIONS_LISTENADDRESS=peer0.judiciary.evidentia.network:9446
+      - CORE_METRICS_PROVIDER=prometheus
+      - CHAINCODE_AS_A_SERVICE_BUILDER_CONFIG={"peername":"peer0judiciary"}
+      - CORE_CHAINCODE_EXECUTETIMEOUT=300s
+      # CouchDB settings
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb.judiciary:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      # Chaincode container network - CRITICAL for chaincode to resolve peer hostname
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=evidentia_network
+      # Use TCP endpoint for Docker on Windows Docker Desktop
+      - CORE_VM_ENDPOINT=tcp://host.docker.internal:2375
+      # Set Docker API version for compatibility
+      - DOCKER_API_VERSION=1.44
+    volumes:
+      - ../crypto-config/peerOrganizations/judiciary.evidentia.network/peers/peer0.judiciary.evidentia.network:/etc/hyperledger/fabric
+      - peer0.judiciary.evidentia.network:/var/hyperledger/production
+      - ../peercfg:/etc/hyperledger/peercfg
+    working_dir: /root
+    command: peer node start
+    ports:
+      - 11051:11051
+      - 9446:9446
+    networks:
+      - evidentia
+
+  # CLI for administrative tasks
+  cli:
+    container_name: cli
+    image: hyperledger/fabric-tools:2.5.10
+    labels:
+      service: hyperledger-fabric
+    tty: true
+    stdin_open: true
+    environment:
+      - GOPATH=/opt/gopath
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_PEER_ID=cli
+      - CORE_PEER_ADDRESS=peer0.lawenforcement.evidentia.network:7051
+      - CORE_PEER_LOCALMSPID=LawEnforcementMSP
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/lawenforcement.evidentia.network/peers/peer0.lawenforcement.evidentia.network/tls/ca.crt
+      - CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/lawenforcement.evidentia.network/users/Admin@lawenforcement.evidentia.network/msp
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: /bin/bash
+    volumes:
+      - ../crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto
+      - ../channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
+      - ../../chaincode:/opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode
+      - ../scripts:/opt/gopath/src/github.com/hyperledger/fabric/peer/scripts
+    depends_on:
+      - peer0.lawenforcement.evidentia.network
+      - peer0.forensiclab.evidentia.network
+      - peer0.judiciary.evidentia.network
+    networks:
+      - evidentia
+

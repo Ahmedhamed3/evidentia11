@@ -1,0 +1,65 @@
+# Copyright Evidentia Chain-of-Custody System
+# Crypto configuration for generating certificates and keys
+#
+# Design Decision: Each organization has its own CA for identity management.
+# Users are created with specific roles encoded in certificate attributes.
+
+OrdererOrgs:
+  - Name: Orderer
+    Domain: evidentia.network
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: orderer
+        SANS:
+          - localhost
+          - 127.0.0.1
+
+PeerOrgs:
+  - Name: LawEnforcement
+    Domain: lawenforcement.evidentia.network
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+        - 127.0.0.1
+    Users:
+      Count: 3
+      # Users will be:
+      # - Admin (default admin user)
+      # - User1 (Evidence Collector role)
+      # - User2 (Supervisor role)
+      # - User3 (additional collector)
+
+  - Name: ForensicLab
+    Domain: forensiclab.evidentia.network
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+        - 127.0.0.1
+    Users:
+      Count: 3
+      # Users will be:
+      # - Admin (default admin user)
+      # - User1 (Forensic Analyst role)
+      # - User2 (Lab Supervisor role)
+      # - User3 (additional analyst)
+
+  - Name: Judiciary
+    Domain: judiciary.evidentia.network
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+        - 127.0.0.1
+    Users:
+      Count: 3
+      # Users will be:
+      # - Admin (default admin user)
+      # - User1 (Legal Counsel role)
+      # - User2 (Judge role)
+      # - User3 (System Auditor role)
+

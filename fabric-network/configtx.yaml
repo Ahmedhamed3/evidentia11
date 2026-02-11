@@ -1,0 +1,177 @@
+# Copyright Evidentia Chain-of-Custody System
+# Configuration for Hyperledger Fabric Network
+# 
+# Design Decision: The paper specifies multiple organizations for forensic workflow.
+# We implement 3 organizations (LawEnforcement, ForensicLab, Judiciary) plus an Orderer org.
+# Single channel "evidence-channel" shared by all orgs for evidence chain-of-custody.
+
+Organizations:
+  - &OrdererOrg
+    Name: OrdererOrg
+    ID: OrdererMSP
+    MSPDir: crypto-config/ordererOrganizations/evidentia.network/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OrdererMSP.admin')"
+    OrdererEndpoints:
+      - orderer.evidentia.network:7050
+
+  - &LawEnforcementOrg
+    Name: LawEnforcementOrg
+    ID: LawEnforcementMSP
+    MSPDir: crypto-config/peerOrganizations/lawenforcement.evidentia.network/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('LawEnforcementMSP.admin', 'LawEnforcementMSP.peer', 'LawEnforcementMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('LawEnforcementMSP.admin', 'LawEnforcementMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('LawEnforcementMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('LawEnforcementMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.lawenforcement.evidentia.network
+        Port: 7051
+
+  - &ForensicLabOrg
+    Name: ForensicLabOrg
+    ID: ForensicLabMSP
+    MSPDir: crypto-config/peerOrganizations/forensiclab.evidentia.network/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('ForensicLabMSP.admin', 'ForensicLabMSP.peer', 'ForensicLabMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('ForensicLabMSP.admin', 'ForensicLabMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('ForensicLabMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('ForensicLabMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.forensiclab.evidentia.network
+        Port: 9051
+
+  - &JudiciaryOrg
+    Name: JudiciaryOrg
+    ID: JudiciaryMSP
+    MSPDir: crypto-config/peerOrganizations/judiciary.evidentia.network/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('JudiciaryMSP.admin', 'JudiciaryMSP.peer', 'JudiciaryMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('JudiciaryMSP.admin', 'JudiciaryMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('JudiciaryMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('JudiciaryMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.judiciary.evidentia.network
+        Port: 11051
+
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_5: true
+
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    LifecycleEndorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+    Endorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  Addresses:
+    - orderer.evidentia.network:7050
+  EtcdRaft:
+    Consenters:
+      - Host: orderer.evidentia.network
+        Port: 7050
+        ClientTLSCert: crypto-config/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/tls/server.crt
+        ServerTLSCert: crypto-config/ordererOrganizations/evidentia.network/orderers/orderer.evidentia.network/tls/server.crt
+  BatchTimeout: 2s
+  BatchSize:
+    MaxMessageCount: 10
+    AbsoluteMaxBytes: 99 MB
+    PreferredMaxBytes: 512 KB
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+  Capabilities:
+    <<: *ChannelCapabilities
+
+Profiles:
+  EvidentiaCoCGenesis:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+      Capabilities: *OrdererCapabilities
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *LawEnforcementOrg
+        - *ForensicLabOrg
+        - *JudiciaryOrg
+      Capabilities: *ApplicationCapabilities
+

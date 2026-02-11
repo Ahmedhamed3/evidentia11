@@ -1,0 +1,50 @@
+# Copyright Evidentia Chain-of-Custody System
+# Docker Compose for CouchDB State Databases
+# 
+# Design Decision: Using CouchDB for rich queries on evidence metadata.
+# Each organization has its own CouchDB instance for state isolation.
+
+networks:
+  evidentia:
+    name: evidentia_network
+
+services:
+  couchdb.lawenforcement:
+    container_name: couchdb.lawenforcement
+    image: couchdb:3.3
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "5984:5984"
+    networks:
+      - evidentia
+
+  couchdb.forensiclab:
+    container_name: couchdb.forensiclab
+    image: couchdb:3.3
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "6984:5984"
+    networks:
+      - evidentia
+
+  couchdb.judiciary:
+    container_name: couchdb.judiciary
+    image: couchdb:3.3
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "7984:5984"
+    networks:
+      - evidentia
+
