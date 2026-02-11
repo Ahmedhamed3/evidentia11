@@ -557,6 +557,36 @@ query_installed_package_id() {
     | awk -v label="${CHAINCODE_NAME}_${CHAINCODE_VERSION}" '$0 ~ label {gsub(/,$/, "", $3); print $3; exit}'
 }
 
+install_chaincode_with_retry() {
+  local org="$1"
+  local package_path="$2"
+  local install_output
+  local max_attempts=3
+  local attempt=1
+
+  while (( attempt <= max_attempts )); do
+    if install_output="$(with_peer_env "$org" "peer lifecycle chaincode install '${package_path}'" 2>&1)"; then
+      printf '%s\n' "$install_output"
+      return 0
+    fi
+
+    printf '%s\n' "$install_output" >&2
+
+    if ! grep -q "write unix @->/var/run/docker.sock: write: broken pipe" <<<"$install_output"; then
+      return 1
+    fi
+
+    if (( attempt == max_attempts )); then
+      log_error "Chaincode install for ${org} kept failing due to Docker socket broken pipe after ${max_attempts} attempts."
+      return 1
+    fi
+
+    log_warn "Docker socket broken pipe detected during chaincode install for ${org}; waiting for Docker daemon to stabilize before retry ${attempt}/${max_attempts}."
+    sleep 8
+    attempt=$((attempt + 1))
+  done
+}
+
 chaincode_committed() {
   with_peer_env "LawEnforcement" "peer lifecycle chaincode querycommitted -C '${CHANNEL_NAME}' -n '${CHAINCODE_NAME}'" 2>/dev/null \
     | grep -q "Version: ${CHAINCODE_VERSION}"
@@ -571,19 +601,26 @@ deploy_chaincode_legacy() {
     return 0
   fi
 
+  local staged_chaincode_path="/tmp/${CHAINCODE_NAME}-build"
+
   log_step "Packaging and installing chaincode (${CHAINCODE_NAME}) in CLI container"
   cli_exec "
     rm -f '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz'
-    cd '${CLI_CHAINCODE_PATH}'
+    rm -rf '${staged_chaincode_path}'
+    mkdir -p '${staged_chaincode_path}'
+    cp -a '${CLI_CHAINCODE_PATH}/.' '${staged_chaincode_path}/'
+    cd '${staged_chaincode_path}'
+    export GOMODCACHE='/tmp/${CHAINCODE_NAME}-gomodcache'
+    export GOCACHE='/tmp/${CHAINCODE_NAME}-gocache'
     GO111MODULE=on go mod tidy
     GO111MODULE=on go mod vendor
   "
 
-  with_peer_env "LawEnforcement" "peer lifecycle chaincode package '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz' --path '${CLI_CHAINCODE_PATH}' --lang golang --label '${CHAINCODE_NAME}_${CHAINCODE_VERSION}'"
+  with_peer_env "LawEnforcement" "peer lifecycle chaincode package '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz' --path '${staged_chaincode_path}' --lang golang --label '${CHAINCODE_NAME}_${CHAINCODE_VERSION}'"
 
-  with_peer_env "LawEnforcement" "peer lifecycle chaincode install '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz'"
-  with_peer_env "ForensicLab" "peer lifecycle chaincode install '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz'"
-  with_peer_env "Judiciary" "peer lifecycle chaincode install '${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz'"
+  install_chaincode_with_retry "LawEnforcement" "${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz"
+  install_chaincode_with_retry "ForensicLab" "${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz"
+  install_chaincode_with_retry "Judiciary" "${CLI_WORKDIR}/${CHAINCODE_NAME}.tar.gz"
 
   local package_id
   package_id="$(query_installed_package_id)"
